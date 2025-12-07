@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import json
 from typing import List, Optional
 import uuid
@@ -62,8 +65,10 @@ def startup():
         meta = {"version": None, "last_trained": None}
     if create_client is not None and SUPABASE_URL and SUPABASE_KEY and SUPABASE_PREDICTIONS_TABLE:
         supabase_client = create_client(str(SUPABASE_URL), SUPABASE_KEY)
+        print("Supabase client initialized.")
     else:
         supabase_client = None
+        print("Supabase client not initialized. Check environment variables.")
 
 def log_to_supabase(request_id: str, items: List[DemandResponse]):
     if supabase_client is None:
@@ -79,8 +84,11 @@ def log_to_supabase(request_id: str, items: List[DemandResponse]):
             }
         )
     try:
-        supabase_client.table(SUPABASE_PREDICTIONS_TABLE).insert(rows).execute()
-    except Exception:
+        supabase_client.table(SUPABASE_PREDICTIONS_TABLE).upsert(
+            rows, on_conflict="settlement_date,settlement_period"
+        ).execute()
+    except Exception as e:
+        print(f"Failed to log to Supabase: {e}")
         return
 
 @app.post("/predict", response_model=DemandResponse)
