@@ -1,21 +1,25 @@
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+BASE = Path(os.getenv("BASE_PATH", ".")).resolve()
 
-load_dotenv()
+RAW_DATA_PATH = BASE / os.getenv("RAW_DATA_PATH", "data/raw/historic_demand_2009_2024.csv")
 
-BASE_PATH = Path(os.getenv("BASE_PATH", ".")).resolve()
-RAW_DATA_PATH = BASE_PATH / os.getenv("RAW_DATA_PATH", "data/raw/historic_demand_2009_2024.csv")
-PROCESSED_DIR = BASE_PATH / os.getenv("PROCESSED_DIR", "data/processed")
-MODEL_DIR = BASE_PATH / os.getenv("MODEL_DIR", "model")
+MODELS_DIR = BASE / os.getenv("MODELS_DIR", "models")
+ARTIFACTS_DIR = BASE / os.getenv("ARTIFACTS_DIR", "artifacts")
+SNAPSHOTS_DIR = ARTIFACTS_DIR / "snapshots"
+META_PATH = ARTIFACTS_DIR / "train_state.json"
+TSD_HISTORY_PATH = ARTIFACTS_DIR / "tsd_history.parquet"
 
-PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
+ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-REQUIRED_COLUMNS = {"settlement_date", "settlement_period", "tsd"}
-DROP_COLUMNS = ["scottish_transfer", "viking_flow", "greenlink_flow", "nsl_flow", "eleclink_flow"]
+DRIFT_THRESHOLD = 0.15
+MIN_NEW_ROWS = 100
 
-TRAIN_STATE_PATH = MODEL_DIR / "train_state.json"
-METRICS_PATH = MODEL_DIR / "metrics.json"
-MODEL_PATH = MODEL_DIR / "final_xgb_model.pkl"
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", os.getenv("SUPABASE_ANON_KEY"))
+SUPABASE_RAW_TABLE = os.getenv("SUPABASE_RAW_TABLE", "demand_raw")
+SUPABASE_PREDICTIONS_TABLE = os.getenv("SUPABASE_PREDICTIONS_TABLE", "demand_predictions")
+SUPABASE_PROCESSED_TABLE = os.getenv("SUPABASE_PROCESSED_TABLE", "demand_processed")

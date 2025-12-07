@@ -2,6 +2,12 @@ pandas
 numpy
 holidays
 xgboost
-datetime
 scikit-learn
+fastapi
+uvicorn[standard]
 python-dotenv
+pydantic
+pyarrow
+scipy
+joblib
+supabase
