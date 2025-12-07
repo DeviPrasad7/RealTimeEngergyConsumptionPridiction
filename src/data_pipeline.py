@@ -23,7 +23,9 @@ def clean_raw_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def apply_holidays(df):
-    uk = holidays.UK(subdiv="England", years=range(2009, 2026))
+    min_year = df["settlement_date"].dt.year.min()
+    max_year = df["settlement_date"].dt.year.max()
+    uk = holidays.UK(subdiv="England", years=range(min_year, max_year + 1))
     df["is_holiday"] = df["settlement_date"].apply(lambda x: x.date() in uk).astype(int)
     return df
 

@@ -1,11 +1,14 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import logging
 import json
 from typing import List, Optional
 import uuid
 import pandas as pd
 import joblib
+from contextlib import asynccontextmanager
+from datetime import date
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from src.config import (
@@ -15,6 +18,7 @@ from src.config import (
     SUPABASE_URL,
     SUPABASE_KEY,
     SUPABASE_PREDICTIONS_TABLE,
+    create_dirs,
 )
 from app.features import load_history, make_timestamp, build_features
 
@@ -24,19 +28,53 @@ except ImportError:
     create_client = None
     Client = None
 
-app = FastAPI()
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 model = None
 history = None
 meta = {}
-supabase_client: Optional["Client"] = None
+supabase_client: Optional[Client] = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global model, history, meta, supabase_client
+    logger.info("Starting up...")
+    create_dirs()
+    versions = sorted(MODELS_DIR.glob("model_v*.pkl"))
+    if not versions:
+        raise RuntimeError("No model versions available.")
+    latest = versions[-1]
+    model = joblib.load(latest)
+    logger.info(f"Loaded model {latest}")
+    if not TSD_HISTORY_PATH.exists():
+        raise RuntimeError(f"History file not found at {TSD_HISTORY_PATH}. Run training first.")
+    history = load_history(TSD_HISTORY_PATH)
+    logger.info(f"Loaded history from {TSD_HISTORY_PATH}")
+    
+    if META_PATH.exists():
+        meta = json.loads(META_PATH.read_text())
+    else:
+        meta = {"version": None, "last_trained": None}
+
+    if create_client and SUPABASE_URL and SUPABASE_KEY and SUPABASE_PREDICTIONS_TABLE:
+        supabase_client = create_client(str(SUPABASE_URL), SUPABASE_KEY)
+        logger.info("Supabase client initialized.")
+    else:
+        supabase_client = None
+        logger.warning("Supabase client not initialized. Check environment variables.")
+    yield
+    logger.info("Shutting down...")
+
+app = FastAPI(lifespan=lifespan)
 
 class DemandRequest(BaseModel):
-    settlement_date: str
+    settlement_date: date
     settlement_period: int = Field(ge=1, le=48)
 
 class DemandResponse(BaseModel):
-    settlement_date: str
+    settlement_date: date
     settlement_period: int
     prediction: float
 
@@ -48,28 +86,6 @@ class HealthResponse(BaseModel):
     status: str
     supabase_connected: bool
 
-@app.on_event("startup")
-def startup():
-    global model, history, meta, supabase_client
-    versions = sorted(MODELS_DIR.glob("model_v*.pkl"))
-    if not versions:
-        raise RuntimeError("No model versions available.")
-    latest = versions[-1]
-    model = joblib.load(latest)
-    if not TSD_HISTORY_PATH.exists():
-        raise RuntimeError(f"History file not found at {TSD_HISTORY_PATH}. Run training first.")
-    history = load_history(TSD_HISTORY_PATH)
-    if META_PATH.exists():
-        meta = json.loads(META_PATH.read_text())
-    else:
-        meta = {"version": None, "last_trained": None}
-    if create_client is not None and SUPABASE_URL and SUPABASE_KEY and SUPABASE_PREDICTIONS_TABLE:
-        supabase_client = create_client(str(SUPABASE_URL), SUPABASE_KEY)
-        print("Supabase client initialized.")
-    else:
-        supabase_client = None
-        print("Supabase client not initialized. Check environment variables.")
-
 def log_to_supabase(request_id: str, items: List[DemandResponse]):
     if supabase_client is None:
         return
@@ -78,7 +94,7 @@ def log_to_supabase(request_id: str, items: List[DemandResponse]):
         rows.append(
             {
                 "request_id": request_id,
-                "settlement_date": item.settlement_date,
+                "settlement_date": item.settlement_date.isoformat(),
                 "settlement_period": item.settlement_period,
                 "prediction": item.prediction,
             }
@@ -88,14 +104,13 @@ def log_to_supabase(request_id: str, items: List[DemandResponse]):
             rows, on_conflict="settlement_date,settlement_period"
         ).execute()
     except Exception as e:
-        print(f"Failed to log to Supabase: {e}")
+        logger.error(f"Failed to log to Supabase: {e}")
         return
 
 @app.post("/predict", response_model=DemandResponse)
 def predict(req: DemandRequest, background_tasks: BackgroundTasks):
-    global model, history
     try:
-        ts = make_timestamp(req.settlement_date, req.settlement_period)
+        ts = make_timestamp(req.settlement_date.isoformat(), req.settlement_period)
         X = build_features(ts, history)
         pred = float(model.predict(X)[0])
         resp = DemandResponse(
@@ -108,43 +123,38 @@ def predict(req: DemandRequest, background_tasks: BackgroundTasks):
         return resp
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception:
+    except Exception as e:
+        logger.error(f"Prediction error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal prediction error.")
 
 @app.post("/predict_bulk", response_model=List[DemandResponse])
 def predict_bulk(reqs: List[DemandRequest], background_tasks: BackgroundTasks):
-    global model, history
     if not reqs:
         raise HTTPException(status_code=400, detail="Empty request list.")
     try:
-        frames = []
-        meta_rows = []
-        for r in reqs:
-            ts = make_timestamp(r.settlement_date, r.settlement_period)
-            X_i = build_features(ts, history)
-            frames.append(X_i)
-            meta_rows.append((r.settlement_date, r.settlement_period))
-        X = frames[0] if len(frames) == 1 else pd.concat(frames)
+        timestamps = [make_timestamp(r.settlement_date.isoformat(), r.settlement_period) for r in reqs]
+        ts_index = pd.DatetimeIndex(timestamps)
+        
+        X = build_features(ts_index, history)
         preds = model.predict(X)
+        
         responses = []
-        for (settlement_date, settlement_period), p in zip(meta_rows, preds):
+        for r, p in zip(reqs, preds):
             responses.append(
                 DemandResponse(
-                    settlement_date=settlement_date,
-                    settlement_period=settlement_period,
+                    settlement_date=r.settlement_date,
+                    settlement_period=r.settlement_period,
                     prediction=float(p)
                 )
             )
+        
         request_id = str(uuid.uuid4())
         background_tasks.add_task(log_to_supabase, request_id, responses)
         return responses
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception:
+    except Exception as e:
+        logger.error(f"Bulk prediction error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal bulk prediction error.")
 
 @app.get("/health", response_model=HealthResponse)

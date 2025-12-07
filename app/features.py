@@ -8,8 +8,6 @@ FEATURES = [
     "lag1", "lag2", "lag3", "is_holiday"
 ]
 
-uk_holidays = holidays.UK(subdiv="England", years=range(2009, 2026))
-
 def load_history(path):
     df = pd.read_parquet(path)
     df.sort_index(inplace=True)
@@ -22,24 +20,34 @@ def make_timestamp(date_str: str, period: int) -> pd.Timestamp:
         s = "0:00:00"
     return pd.to_datetime(f"{date_str} {s}", dayfirst=True)
 
-def build_features(ts: pd.Timestamp, history: pd.DataFrame) -> pd.DataFrame:
-    row = {}
-    row["settlement_period"] = int(((ts - ts.normalize()).seconds // 1800) + 1)
-    row["day_of_month"] = ts.day
-    row["day_of_week"] = ts.day_of_week
-    row["day_of_year"] = ts.day_of_year
-    row["quarter"] = ts.quarter
-    row["month"] = ts.month
-    row["year"] = ts.year
-    row["week_of_year"] = int(ts.isocalendar().week)
-    row["lag1"] = history["tsd"].get(ts - pd.Timedelta("364 days"))
-    row["lag2"] = history["tsd"].get(ts - pd.Timedelta("728 days"))
-    row["lag3"] = history["tsd"].get(ts - pd.Timedelta("1092 days"))
+def build_features(ts: pd.Timestamp | pd.DatetimeIndex, history: pd.DataFrame) -> pd.DataFrame:
+    if isinstance(ts, pd.Timestamp):
+        ts = pd.DatetimeIndex([ts])
+
+    df = pd.DataFrame(index=ts)
+
+    df["settlement_period"] = ((df.index - df.index.normalize()).seconds // 1800) + 1
+    df["day_of_month"] = df.index.day
+    df["day_of_week"] = df.index.dayofweek
+    df["day_of_year"] = df.index.dayofyear
+    df["quarter"] = df.index.quarter
+    df["month"] = df.index.month
+    df["year"] = df.index.year
+    df["week_of_year"] = df.index.isocalendar().week.astype(int)
+    
+    history_map = history["tsd"].to_dict()
+    df["lag1"] = (df.index - pd.Timedelta("364 days")).map(history_map)
+    df["lag2"] = (df.index - pd.Timedelta("728 days")).map(history_map)
+    df["lag3"] = (df.index - pd.Timedelta("1092 days")).map(history_map)
+
     fallback = history["tsd"].tail(2000).mean()
-    for k in ("lag1", "lag2", "lag3"):
-        if row[k] is None:
-            row[k] = fallback
-    d = ts.date()
-    row["is_holiday"] = int(d in uk_holidays)
-    df = pd.DataFrame([row], index=[ts])
+    # Use ffill and bfill to propagate lags, then fill any remaining NaNs
+    df[["lag1", "lag2", "lag3"]] = df[["lag1", "lag2", "lag3"]].ffill().bfill()
+    df[["lag1", "lag2", "lag3"]] = df[["lag1", "lag2", "lag3"]].fillna(fallback)
+
+    min_year = df.index.year.min()
+    max_year = df.index.year.max()
+    uk_holidays = holidays.UK(subdiv="England", years=range(min_year, max_year + 1))
+    df["is_holiday"] = df.index.to_series().apply(lambda x: x.date() in uk_holidays).astype(int)
+
     return df[FEATURES]

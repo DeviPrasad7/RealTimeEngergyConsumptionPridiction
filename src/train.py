@@ -12,6 +12,9 @@ from src.config import (
     SUPABASE_KEY,
     SUPABASE_RAW_TABLE,
     SUPABASE_PROCESSED_TABLE,
+    RAW_DATA_PAGE_SIZE,
+    PROCESSED_DATA_CHUNK_SIZE,
+    create_dirs,
 )
 from src.data_pipeline import preprocess, clean_raw_df
 from src.modeling import make_splits, train_best, FEATURES, TARGET
@@ -50,29 +53,27 @@ def load_raw_supabase() -> pd.DataFrame:
         raise RuntimeError("Supabase is not configured for training.")
     client = create_client(SUPABASE_URL, SUPABASE_KEY)
     
-    logger.info("Getting total number of rows from Supabase...")
-    count_res = client.table(SUPABASE_RAW_TABLE).select("*", count='exact').limit(0).execute()
-    total_rows = count_res.count
-    
-    if total_rows is None:
-        raise RuntimeError("Could not get the total number of rows from Supabase.")
-    
-    logger.info(f"Total rows to download: {total_rows}")
-
+    logger.info("Downloading raw data from Supabase...")
     all_rows = []
-    page_size = 1000
+    start_index = 0
     
-    for start_index in range(0, total_rows, page_size):
-        logger.info(f"Downloading rows from {start_index} to {start_index + page_size - 1}...")
-        res = client.table(SUPABASE_RAW_TABLE).select("*").range(start_index, start_index + page_size - 1).execute()
-        rows = res.data
-        if not rows:
-            break
-        all_rows.extend(rows)
-
+    while True:
+        try:
+            logger.info(f"Downloading rows from {start_index} to {start_index + RAW_DATA_PAGE_SIZE - 1}...")
+            res = client.table(SUPABASE_RAW_TABLE).select("*").range(start_index, start_index + RAW_DATA_PAGE_SIZE - 1).execute()
+            rows = res.data
+            if not rows:
+                break
+            all_rows.extend(rows)
+            start_index += len(rows)
+        except Exception as e:
+            logger.error(f"Failed to download raw data from Supabase: {e}", exc_info=True)
+            raise
+    
     if not all_rows:
         raise RuntimeError("Supabase raw table is empty.")
         
+    logger.info(f"Total rows downloaded: {len(all_rows)}")
     df = pd.DataFrame(all_rows)
     return clean_raw_df(df)
 
@@ -92,15 +93,14 @@ def upload_processed_supabase(df: pd.DataFrame, client: Client):
 
     rows = df_upload.reset_index(drop=True).to_dict(orient="records")
     
-    chunk_size = 500
-    for i in range(0, len(rows), chunk_size):
-        chunk = rows[i:i + chunk_size]
+    for i in range(0, len(rows), PROCESSED_DATA_CHUNK_SIZE):
+        chunk = rows[i:i + PROCESSED_DATA_CHUNK_SIZE]
         try:
             logger.info(f"Upserting rows from {i} to {i + len(chunk) - 1}...")
             client.table(SUPABASE_PROCESSED_TABLE).upsert(chunk, on_conflict="timestamp").execute()
             logger.info(f"Successfully upserted {len(chunk)} rows to {SUPABASE_PROCESSED_TABLE}")
         except Exception as e:
-            logger.error(f"Failed to upsert a chunk of processed data to Supabase: {e}")
+            logger.error(f"Failed to upsert a chunk of processed data to Supabase: {e}", exc_info=True)
             break
 
 def get_processed_data(client: Client) -> pd.DataFrame | None:
@@ -121,7 +121,7 @@ def get_processed_data(client: Client) -> pd.DataFrame | None:
             logger.info(f"Loaded {len(df_processed)} rows of processed data from Supabase.")
             return df_processed
         except Exception as e:
-            logger.warning(f"Could not load processed data: {e}. Reprocessing raw data.")
+            logger.warning(f"Could not load processed data: {e}. Reprocessing raw data.", exc_info=True)
 
     logger.info("New data detected, reprocessing all data.")
     df_processed = preprocess(df_raw)
@@ -136,6 +136,7 @@ def get_processed_data(client: Client) -> pd.DataFrame | None:
 
 def train():
     """Main training function."""
+    create_dirs()
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise RuntimeError("Supabase is not configured. Please set SUPABASE_URL and SUPABASE_KEY.")
 

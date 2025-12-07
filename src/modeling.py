@@ -12,17 +12,24 @@ FEATURES = [
 
 TARGET = "tsd"
 
-def make_splits(df):
-    t1 = pd.to_datetime("01-06-2019", dayfirst=True)
-    t2 = pd.to_datetime("01-06-2021", dayfirst=True)
-    train = df[df.index < t1]
-    test = df[(df.index >= t1) & (df.index < t2)]
-    hold = df[df.index >= t2]
+def make_splits(df, train_pct=0.7, test_pct=0.15):
+    """Splits the dataframe into training, testing, and holdout sets."""
+    n = len(df)
+    train_end = int(n * train_pct)
+    test_end = int(n * (train_pct + test_pct))
+    
+    train = df.iloc[:train_end]
+    test = df.iloc[train_end:test_end]
+    hold = df.iloc[test_end:]
+    
     return train, test, hold
 
 def train_best(train, test, hold):
+    """Trains the best model using RandomizedSearchCV."""
     X_train, y_train = train[FEATURES], train[TARGET]
     X_hold, y_hold = hold[FEATURES], hold[TARGET]
+    X_test, y_test = test[FEATURES], test[TARGET]
+
     base = xgb.XGBRegressor(
         booster="gbtree",
         tree_method="hist",
@@ -54,20 +61,11 @@ def train_best(train, test, hold):
         verbose=0
     )
     search.fit(X_train, y_train, eval_set=[(X_hold, y_hold)], verbose=False)
-    best = xgb.XGBRegressor(
-        **search.best_params_,
-        booster="gbtree",
-        tree_method="hist",
-        objective="reg:squarederror",
-        random_state=43,
-        n_estimators=1500,
-        learning_rate=0.02,
-        early_stopping_rounds=80,
-        n_jobs=-1,
-        eval_metric="rmse"
-    )
-    best.fit(X_train, y_train, eval_set=[(X_hold, y_hold)], verbose=False)
-    pred = best.predict(test[FEATURES])
-    rmse = root_mean_squared_error(test[TARGET], pred)
-    r2 = r2_score(test[TARGET], pred)
-    return best, rmse, r2
+    
+    best_model = search.best_estimator_
+    
+    pred = best_model.predict(X_test)
+    rmse = root_mean_squared_error(y_test, pred)
+    r2 = r2_score(y_test, pred)
+    
+    return best_model, rmse, r2
