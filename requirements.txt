@@ -4,3 +4,4 @@ holidays
 xgboost
 datetime
 scikit-learn
+python-dotenv
