@@ -1,3 +1,4 @@
+import os
 import datetime
 import pickle
 from pathlib import Path
@@ -6,46 +7,51 @@ import holidays
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from dotenv import load_dotenv
 from scipy.stats import randint, uniform
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 
-BASE_PATH = Path(r"C:\Time_Series_XGB")
-RAW_DATA_PATH = BASE_PATH / "data" / "raw" / "historic_demand_2009_2024.csv"
-PROCESSED_DIR = BASE_PATH / "data" / "processed"
-MODEL_DIR = BASE_PATH / "model"
+# Load environment variables from .env (for local/dev)
+load_dotenv()
+
+# Paths
+BASE_PATH = Path(os.getenv("BASE_PATH", ".")).resolve()
+RAW_DATA_PATH = BASE_PATH / os.getenv("RAW_DATA_PATH", "data/raw/historic_demand_2009_2024.csv")
+PROCESSED_DIR = BASE_PATH / os.getenv("PROCESSED_DIR", "data/processed")
+MODEL_DIR = BASE_PATH / os.getenv("MODEL_DIR", "model")
 
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
+# Load and clean raw data
 df = pd.read_csv(RAW_DATA_PATH, index_col=0)
 df.columns = df.columns.str.lower()
 df.drop(columns=["scottish_transfer", "viking_flow", "greenlink_flow"], inplace=True)
-
 df.drop(columns=["nsl_flow", "eleclink_flow"], axis=1, inplace=True)
 df.drop(index=df[df["settlement_period"] > 48].index, inplace=True)
 df.reset_index(drop=True, inplace=True)
 
+# Holiday feature
 uk_holidays = holidays.UK(subdiv="England", years=range(2009, 2024), observed=True)
-
 df["is_holiday"] = df["settlement_date"].apply(
     lambda x: pd.to_datetime(x).date() in uk_holidays
 )
 df["is_holiday"] = df["is_holiday"].astype(int)
 
+# Remove broken days
 null_days = df.loc[df["tsd"] == 0.0, "settlement_date"].unique().tolist()
 null_days_index = []
 for day in null_days:
     null_days_index.extend(df[df["settlement_date"] == day].index.tolist())
-
 df.drop(index=null_days_index, inplace=True)
 df.reset_index(drop=True, inplace=True)
 
+# Build proper datetime index
 df["period_hour"] = df["settlement_period"].apply(
     lambda x: str(datetime.timedelta(hours=(x - 1) * 0.5))
 )
 df.loc[df["period_hour"] == "1 day, 0:00:00", "period_hour"] = "0:00:00"
-
 period_hour_col = df.pop("period_hour")
 df.insert(2, "period_hour", period_hour_col)
 
@@ -77,9 +83,9 @@ def add_lags(frame: pd.DataFrame) -> pd.DataFrame:
 
 df = create_features(df)
 df = add_lags(df)
-
 df.dropna(subset=["lag1", "lag2", "lag3"], inplace=True)
 
+# Time-based splits
 threshold_date_1 = pd.to_datetime("06-01-2019", dayfirst=True)
 threshold_date_2 = pd.to_datetime("06-01-2021", dayfirst=True)
 
@@ -112,6 +118,7 @@ y_test = test_data[TARGET]
 X_hold_out = hold_out_data[FEATURES]
 y_hold_out = hold_out_data[TARGET]
 
+# Hyperparameter search
 n_splits = 5
 tss = TimeSeriesSplit(n_splits=n_splits)
 
@@ -155,9 +162,9 @@ xgb_search = RandomizedSearchCV(
 )
 
 xgb_search.fit(X_train, y_train, **fit_params)
-
 best_params = xgb_search.best_params_
 
+# Final model
 final_model = xgb.XGBRegressor(
     **best_params,
     booster="gbtree",
@@ -178,8 +185,8 @@ final_model.fit(
     verbose=True,
 )
 
+# Evaluation
 y_pred_test = final_model.predict(X_test)
-
 rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
 mae = mean_absolute_error(y_test, y_pred_test)
 r2 = r2_score(y_test, y_pred_test)
@@ -189,6 +196,7 @@ print(f"RMSE: {rmse:.4f}")
 print(f"MAE : {mae:.4f}")
 print(f"R^2 : {r2:.4f}")
 
+# Save processed data and model
 train_data.to_csv(PROCESSED_DIR / "train_data.csv", index=False)
 test_data.to_csv(PROCESSED_DIR / "test_data.csv", index=False)
 hold_out_data.to_csv(PROCESSED_DIR / "hold_out_data.csv", index=False)
