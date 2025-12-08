@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Cache pip dependencies
         uses: actions/cache@v3
@@ -47,21 +47,25 @@ jobs:
       - name: Build Docker Image
         run: docker build . -t time-series-xgb:latest
 
-      - name: Run Docker Container
+      - name: Run Docker Container (for integration tests)
         run: |
+          set +e
           docker run -d --name my-app -p 8000:8000 time-series-xgb:latest
+
           for i in $(seq 1 10); do
-            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health)
+            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
             if [ "$response" -eq 200 ]; then
               echo "Application is up!"
               break
             fi
-            echo "Waiting for application to start... ($i/10)"
+            echo "Waiting for application to start... ($i/10), got HTTP $response"
             sleep 5
           done
-          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health)
+
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
           if [ "$response" -ne 200 ]; then
-            docker logs my-app
+            echo "Application did not start in time. Final HTTP code: $response"
+            docker logs my-app || true
             exit 1
           fi
 
