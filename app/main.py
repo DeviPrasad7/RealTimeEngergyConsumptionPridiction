@@ -57,7 +57,7 @@ def log_request_metrics(
 model = None
 history = None
 meta = {}
-supabase_client: Optional[Client] = None
+supabase_client: Optional[Client] = None # type: ignore
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

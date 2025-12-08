@@ -13,3 +13,4 @@ joblib==1.5.2
 supabase==2.25.0
 pytest==9.0.2
 requests==2.32.5
+ruff==0.1.14
