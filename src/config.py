@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv # type: ignore
 load_dotenv()
 
 BASE = Path(os.getenv("BASE_PATH", ".")).resolve()
@@ -29,5 +29,5 @@ SUPABASE_RAW_TABLE = os.getenv("SUPABASE_RAW_TABLE", "demand_raw")
 SUPABASE_PREDICTIONS_TABLE = os.getenv("SUPABASE_PREDICTIONS_TABLE", "demand_predictions")
 SUPABASE_PROCESSED_TABLE = os.getenv("SUPABASE_PROCESSED_TABLE", "demand_processed")
 
-RAW_DATA_PAGE_SIZE = int(os.getenv("RAW_DATA_PAGE_SIZE", 1000))
-PROCESSED_DATA_CHUNK_SIZE = int(os.getenv("PROCESSED_DATA_CHUNK_SIZE", 500))
+RAW_DATA_PAGE_SIZE = int(os.getenv("RAW_DATA_PAGE_SIZE", 50000))
+PROCESSED_DATA_CHUNK_SIZE = int(os.getenv("PROCESSED_DATA_CHUNK_SIZE", 50000))
