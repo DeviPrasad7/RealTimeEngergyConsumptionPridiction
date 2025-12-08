@@ -18,7 +18,7 @@ def make_timestamp(date_str: str, period: int) -> pd.Timestamp:
     s = str(td)
     if s == "1 day, 0:00:00":
         s = "0:00:00"
-    return pd.to_datetime(f"{date_str} {s}", dayfirst=True)
+    return pd.to_datetime(f"{date_str} {s}", format='%Y-%m-%d %H:%M:%S')
 
 def build_features(ts: pd.Timestamp | pd.DatetimeIndex, history: pd.DataFrame) -> pd.DataFrame:
     if isinstance(ts, pd.Timestamp):

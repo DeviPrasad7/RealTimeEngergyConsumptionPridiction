@@ -8,8 +8,8 @@ import uuid
 import pandas as pd
 import joblib
 from contextlib import asynccontextmanager
-from datetime import date
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from datetime import date, datetime
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 from src.config import (
     MODELS_DIR,
@@ -31,6 +31,28 @@ except ImportError:
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+def log_request_metrics(
+    timestamp: datetime,
+    request_id: str,
+    path: str,
+    status: str,
+    latency_ms: float,
+    model_version: Optional[str],
+    n_predictions: Optional[int] = None,
+):
+    log_details = [
+        f"  TIMESTAMP: {timestamp.isoformat()}",
+        f"  REQUEST_ID: {request_id}",
+        f"  PATH: {path}",
+        f"  STATUS: {status}",
+        f"  LATENCY_MS: {latency_ms:.2f}",
+        f"  MODEL_VERSION: {model_version or 'N/A'}",
+    ]
+    if n_predictions is not None:
+        log_details.append(f"  N_PREDICTIONS: {n_predictions}")
+    
+    logger.info("Request Metrics:\n" + "\n".join(log_details))
 
 model = None
 history = None
@@ -108,7 +130,12 @@ def log_to_supabase(request_id: str, items: List[DemandResponse]):
         return
 
 @app.post("/predict", response_model=DemandResponse)
-def predict(req: DemandRequest, background_tasks: BackgroundTasks):
+def predict(req: DemandRequest, background_tasks: BackgroundTasks, request: Request):
+    start_time = datetime.now()
+    request_id = str(uuid.uuid4())
+    status = "failed"
+    n_predictions = 1
+
     try:
         ts = make_timestamp(req.settlement_date.isoformat(), req.settlement_period)
         X = build_features(ts, history)
@@ -118,17 +145,36 @@ def predict(req: DemandRequest, background_tasks: BackgroundTasks):
             settlement_period=req.settlement_period,
             prediction=pred
         )
-        request_id = str(uuid.uuid4())
+        # Use the same request_id for Supabase logging
         background_tasks.add_task(log_to_supabase, request_id, [resp])
+        status = "success"
         return resp
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Prediction error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal prediction error.")
+    finally:
+        end_time = datetime.now()
+        latency_ms = (end_time - start_time).total_seconds() * 1000
+        model_version = meta.get("version")
+        log_request_metrics(
+            timestamp=start_time,
+            request_id=request_id,
+            path=request.url.path,
+            status=status,
+            latency_ms=latency_ms,
+            model_version=model_version,
+            n_predictions=n_predictions,
+        )
 
 @app.post("/predict_bulk", response_model=List[DemandResponse])
-def predict_bulk(reqs: List[DemandRequest], background_tasks: BackgroundTasks):
+def predict_bulk(reqs: List[DemandRequest], background_tasks: BackgroundTasks, request: Request):
+    start_time = datetime.now()
+    request_id = str(uuid.uuid4())
+    status = "failed"
+    n_predictions = len(reqs)
+
     if not reqs:
         raise HTTPException(status_code=400, detail="Empty request list.")
     try:
@@ -148,28 +194,67 @@ def predict_bulk(reqs: List[DemandRequest], background_tasks: BackgroundTasks):
                 )
             )
         
-        request_id = str(uuid.uuid4())
+        # Use the same request_id for Supabase logging
         background_tasks.add_task(log_to_supabase, request_id, responses)
+        status = "success"
         return responses
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Bulk prediction error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal bulk prediction error.")
+    finally:
+        end_time = datetime.now()
+        latency_ms = (end_time - start_time).total_seconds() * 1000
+        model_version = meta.get("version")
+        log_request_metrics(
+            timestamp=start_time,
+            request_id=request_id,
+            path=request.url.path,
+            status=status,
+            latency_ms=latency_ms,
+            model_version=model_version,
+            n_predictions=n_predictions,
+        )
 
 @app.get("/health", response_model=HealthResponse)
-def health():
-    m_ok = model is not None
-    h_ok = history is not None
-    v = meta.get("version")
-    t = meta.get("last_trained")
-    s_ok = supabase_client is not None
-    status = "ok" if (m_ok and h_ok) else "degraded"
-    return HealthResponse(
-        model_loaded=m_ok,
-        history_loaded=h_ok,
-        last_trained=t,
-        version=v,
-        status=status,
-        supabase_connected=s_ok
-    )
+def health(request: Request):
+    start_time = datetime.now()
+    request_id = str(uuid.uuid4())
+    status = "failed"
+    
+    try:
+        m_ok = model is not None
+        h_ok = history is not None
+        v = meta.get("version")
+        t = meta.get("last_trained")
+        s_ok = supabase_client is not None
+        endpoint_status = "ok" if (m_ok and h_ok) else "degraded"
+        
+        resp = HealthResponse(
+            model_loaded=m_ok,
+            history_loaded=h_ok,
+            last_trained=t,
+            version=v,
+            status=endpoint_status,
+            supabase_connected=s_ok
+        )
+        status = "success"
+        return resp
+    except Exception as e:
+        logger.error(f"Health check error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal health check error.")
+    finally:
+        end_time = datetime.now()
+        latency_ms = (end_time - start_time).total_seconds() * 1000
+        # For health endpoint, model_version and n_predictions are not directly applicable in the same way as predict endpoints
+        # We can pass None for these or specific values if desired.
+        log_request_metrics(
+            timestamp=start_time,
+            request_id=request_id,
+            path=request.url.path,
+            status=status,
+            latency_ms=latency_ms,
+            model_version=meta.get("version"), # Still useful to know which model version is reported in health
+            n_predictions=None, 
+        )
