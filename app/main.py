@@ -1,6 +1,3 @@
-from dotenv import load_dotenv
-load_dotenv()
-
 import logging
 import json
 from typing import List, Optional

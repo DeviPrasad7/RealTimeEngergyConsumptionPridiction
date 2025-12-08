@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+load_dotenv()
+
 BASE = Path(os.getenv("BASE_PATH", ".")).resolve()
 
 RAW_DATA_PATH = BASE / os.getenv("RAW_DATA_PATH", "data/raw/historic_demand_2009_2024.csv")
