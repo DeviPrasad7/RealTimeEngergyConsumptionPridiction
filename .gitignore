@@ -4,14 +4,6 @@ __pycache__/
 # Virtual environments
 .venv/
 
-# Model artifacts
-*.pkl
-models/
-
-# Data
-data/raw/
-data/processed/
-
 # Environment & OS files
 .env
 .DS_Store
