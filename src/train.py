@@ -1,6 +1,7 @@
 import pandas as pd
 import joblib
 import logging
+
 from src.config import (
     TSD_HISTORY_PATH,
     DRIFT_THRESHOLD,
@@ -38,7 +39,7 @@ def drift_score(df_old: pd.DataFrame, df_new: pd.DataFrame) -> float:
     b = df_new["tsd"].tail(2000).values
     if len(a) == 0 or len(b) == 0:
         return 1.0
-    return float(abs(a.mean() - b.mean()) / max(a.mean(), 1e-6))
+    return float(abs(a.mean() - b.mean()) / max(a.mean(), 1e-6)) # type: ignore
 
 def build_history(df: pd.DataFrame, end_date: pd.Timestamp):
     start = end_date - pd.Timedelta("1095 days")
@@ -65,6 +66,7 @@ def load_raw_supabase() -> pd.DataFrame:
             start_index += len(rows)
         except Exception as e:
             logger.error(f"Failed to download raw data from Supabase: {e}", exc_info=True)
+            logger.error(f"Connection failed. Please check SUPABASE_URL in .env. Current value: {str(SUPABASE_URL)[:30]}...")
             raise
     
     if not all_rows:
@@ -74,7 +76,7 @@ def load_raw_supabase() -> pd.DataFrame:
     df = pd.DataFrame(all_rows)
     return clean_raw_df(df)
 
-def upload_processed_supabase(df: pd.DataFrame, client: Client):
+def upload_processed_supabase(df: pd.DataFrame, client: Client): # type: ignore
     if df.empty:
         logger.info("Processed dataframe is empty. Nothing to upload.")
         return
@@ -100,8 +102,7 @@ def upload_processed_supabase(df: pd.DataFrame, client: Client):
             logger.error(f"Failed to upsert a chunk of processed data to Supabase: {e}", exc_info=True)
             break
 
-def get_processed_data(client: Client) -> pd.DataFrame | None:
-    """Gets the processed data, using cached data if possible."""
+def get_processed_data(client: Client) -> pd.DataFrame | None: # type: ignore
     try:
         df_raw = load_raw_supabase()
         logger.info(f"Loaded {len(df_raw)} rows from Supabase.")
@@ -132,12 +133,11 @@ def get_processed_data(client: Client) -> pd.DataFrame | None:
     return df_processed
 
 def train():
-    """Main training function."""
     create_dirs()
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise RuntimeError("Supabase is not configured. Please set SUPABASE_URL and SUPABASE_KEY.")
 
-    client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    client = create_client(SUPABASE_URL, SUPABASE_KEY) # type: ignore
     df = get_processed_data(client)
 
     if df is None or df.empty:
@@ -148,7 +148,6 @@ def train():
     if meta["last_hash"]:
         df_old = pd.read_parquet(TSD_HISTORY_PATH) if TSD_HISTORY_PATH.exists() else None
         if df_old is not None:
-            # Pass the raw dataframe to drift_score
             df_raw = load_raw_supabase()
             d = drift_score(df_old, df_raw)
             if d < DRIFT_THRESHOLD:

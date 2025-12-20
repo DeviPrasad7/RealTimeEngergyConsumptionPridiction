@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv # type: ignore
+from dotenv import load_dotenv
 load_dotenv()
 
 BASE = Path(os.getenv("BASE_PATH", ".")).resolve()
