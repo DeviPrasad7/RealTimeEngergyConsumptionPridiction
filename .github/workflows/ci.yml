@@ -19,26 +19,17 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Ruff auto-fix and check
-        run: |
-          ruff --fix .
-          ruff . --output-format=github
+      - name: Run Ruff check
+        run: ruff check . --output-format=github
 
-      - name: Run Unit Tests
+      - name: Run Tests (Unit & Integration)
         run: pytest
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -47,10 +38,13 @@ jobs:
       - name: Build Docker Image
         run: docker build . -t time-series-xgb:latest
 
-      - name: Run Docker Container (for integration tests)
+      - name: Run Docker Container (Smoke Test)
         run: |
           set +e
-          docker run -d --name my-app -p 8000:8000 time-series-xgb:latest
+          docker run -d --name my-app \
+            -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
+            -e SUPABASE_KEY="${{ secrets.SUPABASE_SERVICE_KEY }}" \
+            -p 8000:8000 time-series-xgb:latest
 
           for i in $(seq 1 10); do
             response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
@@ -68,9 +62,6 @@ jobs:
             docker logs my-app || true
             exit 1
           fi
-
-      - name: Run Integration Tests
-        run: curl -f http://localhost:8000/health
 
       - name: Stop and Remove Container
         if: always()
