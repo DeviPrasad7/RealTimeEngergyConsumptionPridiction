@@ -12,7 +12,7 @@ jobs:
       - name: Ping Database via REST API
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TABLE: "demand_raw"
         run: |
           curl -fsS -X GET "$SUPABASE_URL/rest/v1/$TABLE?select=*&limit=1" \
