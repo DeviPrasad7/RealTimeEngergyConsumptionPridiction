@@ -15,7 +15,8 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TABLE: "demand_raw"
         run: |
-          curl -X POST "$SUPABASE_URL/rest/v1/heartbeat" \
+          set -e
+          curl -i -f "$SUPABASE_URL/rest/v1/heartbeat" \
             -H "apikey: $SUPABASE_KEY" \
             -H "Authorization: Bearer $SUPABASE_KEY" \
             -H "Content-Type: application/json" \
