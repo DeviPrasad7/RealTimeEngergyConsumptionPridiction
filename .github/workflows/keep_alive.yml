@@ -15,7 +15,8 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TABLE: "demand_raw"
         run: |
-          curl -fsS "$SUPABASE_URL/rest/v1/$TABLE?select=id&limit=1" \
+          curl -X POST "$SUPABASE_URL/rest/v1/heartbeat" \
             -H "apikey: $SUPABASE_KEY" \
             -H "Authorization: Bearer $SUPABASE_KEY" \
-            || { echo "Supabase ping failed"; exit 1; }
+            -H "Content-Type: application/json" \
+            -d '{"last_seen": "now()"}'
