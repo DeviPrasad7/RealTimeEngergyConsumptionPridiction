@@ -41,7 +41,7 @@ def build_features(ts: pd.Timestamp | pd.DatetimeIndex, history: pd.DataFrame) -
     df["lag3"] = (df.index - pd.Timedelta("1092 days")).map(history_map)
 
     fallback = history["tsd"].tail(2000).mean()
-    # Use ffill and bfill to propagate lags, then fill any remaining NaNs
+    
     df[["lag1", "lag2", "lag3"]] = df[["lag1", "lag2", "lag3"]].ffill().bfill()
     df[["lag1", "lag2", "lag3"]] = df[["lag1", "lag2", "lag3"]].fillna(fallback)
 

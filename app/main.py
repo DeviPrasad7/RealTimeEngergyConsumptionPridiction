@@ -191,7 +191,6 @@ def predict_bulk(reqs: List[DemandRequest], background_tasks: BackgroundTasks, r
                 )
             )
         
-        # Use the same request_id for Supabase logging
         background_tasks.add_task(log_to_supabase, request_id, responses)
         status = "success"
         return responses
@@ -244,14 +243,12 @@ def health(request: Request):
     finally:
         end_time = datetime.now()
         latency_ms = (end_time - start_time).total_seconds() * 1000
-        # For health endpoint, model_version and n_predictions are not directly applicable in the same way as predict endpoints
-        # We can pass None for these or specific values if desired.
         log_request_metrics(
             timestamp=start_time,
             request_id=request_id,
             path=request.url.path,
             status=status,
             latency_ms=latency_ms,
-            model_version=meta.get("version"), # Still useful to know which model version is reported in health
+            model_version=meta.get("version"),
             n_predictions=None, 
         )

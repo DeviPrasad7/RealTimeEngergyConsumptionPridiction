@@ -12,7 +12,6 @@ FEATURES = [
 TARGET = "tsd"
 
 def make_splits(df, train_pct=0.7, test_pct=0.15):
-    """Splits the dataframe into training, testing, and holdout sets."""
     n = len(df)
     train_end = int(n * train_pct)
     test_end = int(n * (train_pct + test_pct))
@@ -24,7 +23,6 @@ def make_splits(df, train_pct=0.7, test_pct=0.15):
     return train, test, hold
 
 def train_best(train, test, hold):
-    """Trains the best model using RandomizedSearchCV."""
     X_train, y_train = train[FEATURES], train[TARGET]
     X_hold, y_hold = hold[FEATURES], hold[TARGET]
     X_test, y_test = test[FEATURES], test[TARGET]
@@ -63,7 +61,7 @@ def train_best(train, test, hold):
     
     best_model = search.best_estimator_
     
-    pred = best_model.predict(X_test)
+    pred = best_model.predict(X_test) # type: ignore
     rmse = root_mean_squared_error(y_test, pred)
     r2 = r2_score(y_test, pred)
     
